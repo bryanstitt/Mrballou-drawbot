@@ -2,4 +2,6 @@ server/aborting.json
 
 server/config.json
 server/gui.json
+server/node_modules/*
+server/nodemon.json
 *.png

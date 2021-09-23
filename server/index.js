@@ -9,40 +9,284 @@ const Jimp = require("jimp");
 const fs = require("fs");
 const mcfsd = require("mcfsd");
 const express = require("express");
-const resizeImg = require("resize-img");
+const Eta = require("node-eta");
+const DitherJS = require('ditherjs/server');
 
-var port = 49152;
-var nextline;
-var tries = 0;
-//var resizingFactor = 1
-var resizeDelay = 5;
+/*
 
-const app = express();
-app.listen(port, () => {
-  console.log("listining on", port);
-});
-app.use(express.static("public"));
+console.log(eta.format(
+        "elapsed: {{elapsed}},eta: {{eta}}, estimated: {{estimated}}, progress: {{progress}}, etah: {{etah}}, last: {{last}}"
+      )
+    );
+*/
 
-if (debug) console.log(`loading config from:`, "./server/config.json");
-const config = JSON.parse(fs.readFileSync("./server/config.json"));
-if (debug) console.log(`config loaded:`, config);
+var resizeSteps = 1,
+  retries = 5,
+  dither,
+  sortColors,
+  fast,
+  bucket,
+  resizing = true,
+  platform,
+  totallines,
+  oneLineIs,
+  accuracy,
+  delayBetweenColors,
+  colors,
+  file,
+  ditherAccuracy,
+  config,
+  resizeDelay = 5,
+  nearestColor,
+  ignoringColors,
+  manuIgnoreColor,
+  aborting = false,
+  mousePos,
+  tries = 0;
+function main() {
+  var port = 49152;
+  var nextline;
+  //var resizingFactor = 1
+  var resizeDelay = 5;
 
-var aborting = false;
+  const app = express();
+  app.listen(port, () => {
+    console.log("listining on", port);
+  });
+  app.use(express.static("public"));
 
-var rgbToHex = function (rgb) {
-  var hex = Number(rgb).toString(16);
-  if (hex.length < 2) {
-    hex = "0" + hex;
+  if (debug) console.log(`loading config from:`, "./server/config.json");
+  config = JSON.parse(fs.readFileSync("./server/config.json"));
+  if (debug) console.log(`config loaded:`, config);
+
+  app.get("/draw", (request, response) => {
+    tries = 0
+    response.send({});
+    function try_() {
+      tries++
+      var eta = new Eta(5);
+      eta.start();
+      //console.log('got instructions')
+      if (debug) console.log(`got instruction to draw`);
+      if (debug) console.log(`loaded config:`, config);
+      aborting = false;
+
+      fs.unlink("./server/aborting.json", () => {
+        if (debug) console.log(`deleted "aborting.json" file`);
+      });
+      var gui = JSON.parse(fs.readFileSync("./server/gui.json"));
+      if (debug) console.log(`gui loaded:`, gui);
+
+      dither = gui.dither;
+      sortColors = gui.sortColors;
+      fast = gui.fast;
+      bucket = gui.bucket;
+
+      var { image, speed } = gui;
+      delayBetweenColors = gui.delayBetweenColors;
+      accuracy = gui.accuracy;
+      totallines = gui.totallines;
+      oneLineIs = gui.oneLineIs;
+      platform = gui.platform;
+      ditherAccuracy = gui.ditherAccuracy;
+      manuIgnoreColor = gui.ignoreColor
+      robot.setMouseDelay(speed);
+      if (debug) console.log(`config for platform:`, config[platform]);
+      if (typeof config[platform] === "undefined")
+        return console.error("invalid platform");
+      colors = config[platform].colors;
+      //console.log(colors)
+      nearestColor = require("nearest-color").from(colors);
+      eta.iterate("index complete");
+
+      //console.log(nearestColor)
+
+      download(image, (error, file) => {
+        if (error) {
+          console.log(error, 'try', tries)
+          if (tries >= retries) {
+            console.log('retrying aborted with', tries, 'tries')
+            return
+          }
+          try_()
+          return
+        }
+        eta.iterate("download complete");
+        console.log(eta.format("elapsed time: {{elapsed}}seconds, expected rest time: {{etah}}"));
+
+
+        resize(file, (file) => {
+          eta.iterate("resize complete");
+          console.log(eta.format("elapsed time: {{elapsed}}seconds, expected rest time: {{etah}}"));
+
+
+          dither_(file, (file) => {
+
+            initDraw(file, (drawInstructions, drawInstructionsBu, usedColors) => {
+              //console.log(drawInstructions)
+              eta.iterate("initing complete");
+              console.log(eta.format("elapsed time: {{elapsed}}seconds, expected rest time: {{etah}}"));
+
+
+              sortDraw(drawInstructions, drawInstructionsBu, usedColors, (drawInstructions) => {
+                eta.iterate("sort complete");
+                console.log(eta.format("elapsed time: {{elapsed}}seconds, expected rest time: {{etah}}"));
+                console.log("done initializing");
+                //console.log(drawInstructions);
+                draw(drawInstructions);
+              }
+              );
+            });
+          });
+        });
+      });
+    }
+    try_()
+  });
+}
+
+function download(link, callback) {
+  if (debug) console.log(`downloading image`);
+
+  Jimp.read(link, function (err, image) {
+    if (typeof image === "undefined") {
+      callback("Invalid image provided", "./server/images/downloaded_image.png");
+      return
+    }
+    image.write("./server/images/downloaded_image.png", () => {
+      if (typeof callback === "function") {
+        //return './server/images/downloaded_image.png'
+        callback(undefined, "./server/images/downloaded_image.png");
+      }
+    });
+  });
+}
+function dither_(image_path, callback) {
+  if (dither) {
+    console.log("dithering", image_path);
+    //console.log(config[platform])
+    var ditherArray = [];
+    for (let c in config[platform].colors) {
+      ditherArray.push([])
+      var hex = config[platform].colors[c]
+      var rgb = hexToRgb(hex)
+      ditherArray[ditherArray.length - 1].push(rgb.r, rgb.g, rgb.b)
+    }
+    console.log(ditherArray)
+
+    var buffer = fs.readFileSync(image_path)
+    var options = {
+      "step": ditherAccuracy, // The step for the pixel quantization n = 1,2,3...
+      "palette": ditherArray, // an array of colors as rgb arrays
+      "algorithm": "atkinson" // one of ["ordered", "diffusion", "atkinson"]
+    };
+
+    var ditherjs = new DitherJS(options);
+
+
+    // Get a buffer that can be loaded into a canvas
+    //console.log(buffer)
+
+    var newBuffer = ditherjs.dither(buffer, options)
+
+    fs.writeFileSync(`./server/images/dithered_image.png`, newBuffer)
+    if (typeof callback === 'function') callback(`./server/images/dithered_image.png`)
+
+  } else {
+    if (typeof callback === "function") callback(image_path);
   }
-  return hex;
-};
-var fullColorHex = function (r, g, b) {
-  var red = rgbToHex(r);
-  var green = rgbToHex(g);
-  var blue = rgbToHex(b);
-  return red + green + blue;
-};
+}
+function resize(image_path, callback) {
+  console.log("resizing", image_path);
 
+  var w = Math.round(
+    (config[platform].positions.bottomright.x -
+      config[platform].positions.topleft.x) /
+    oneLineIs
+  );
+  var h = Math.round(
+    (config[platform].positions.bottomright.y -
+      config[platform].positions.topleft.y) /
+    oneLineIs
+  );
+  console.log("max dimentions:", w, h);
+  Jimp.read(image_path, function (err, image) {
+    var newWidth, newHeight, tempnewWidth, tempnewHeight, canDraw, type;
+    getMaxSize(w, h, image.bitmap.width, image.bitmap.height);
+    async function getMaxSize(mwidth, mheight, cwidth, cheight) {
+      if (typeof newHeight === "undefined" || typeof newWidth === "undefined") {
+        newHeight = cheight;
+        newWidth = cwidth;
+        tempnewHeight = cheight;
+        tempnewWidth = cwidth;
+      }
+      if ((cwidth < mwidth || cheight < mheight) && type !== "min") {
+        //maximise
+        //if (typeof resizeSteps !== "undefined") {
+        //  tempnewWidth = Math.round(cwidth + resizeSteps);
+        //  tempnewHeight = Math.round(cheight + resizeSteps);
+        //} else {
+        tempnewWidth = Math.round(cwidth * 1.05);
+        tempnewHeight = Math.round(cheight * 1.05);
+        //}
+        if (tempnewHeight > mheight || tempnewWidth > mwidth) {
+          canDraw = true;
+        } else {
+          type = "max";
+
+          setTimeout(() => {
+            console.log(
+              "resizing to:",
+              tempnewWidth,
+              tempnewHeight,
+              "(maximising)"
+            );
+
+            getMaxSize(mwidth, mheight, tempnewWidth, tempnewHeight);
+          }, resizeDelay);
+        }
+      }
+      if (cwidth > mwidth || (cheight > mheight && type !== "max")) {
+        //minimise
+        if (
+          typeof resizeSteps !== "undefined" &&
+          (Math.round(cheight / 1.05) === cheight ||
+            Math.round(cwidth / 1.05) === cwidth)
+        ) {
+          newWidth = Math.round(cwidth - resizeSteps);
+          newHeight = Math.round(cheight - resizeSteps);
+        } else {
+          newWidth = Math.round(cwidth / 1.05);
+          newHeight = Math.round(cheight / 1.05);
+        }
+        type = "min";
+        canDraw = false;
+        setTimeout(() => {
+          console.log("resizing to:", newWidth, newHeight, "(minimising)");
+
+          getMaxSize(mwidth, mheight, newWidth, newHeight);
+        }, resizeDelay);
+      } else {
+        //console.log('can draw:', canDraw,'type:', type)
+        if (type === "min") {
+          canDraw = true;
+        }
+      }
+      if (canDraw) {
+        if (cwidth <= 0 || cheight <= 0)
+          return console.log("can't process that image");
+
+        //var newImage = await resizeImg(fs.readFileSync(image_path), { width: cwidth, height: cheight });
+        file = "./server/images/resized_image.png";
+        image
+          .resize(cwidth, cheight)
+          .write("./server/images/resized_image.png", () => {
+            if (typeof callback === "function") callback(file);
+          });
+      }
+    }
+  });
+}
 function sortOBJ(obj) {
   var largest = {
     value: 0,
@@ -72,435 +316,283 @@ function sortOBJBySize(obj) {
   return objSorted;
 }
 
-app.get("/draw", (request, response) => {
-  if (debug) console.log(`got instruction to draw`);
-  if (debug) console.log(`loaded config:`, config);
-  aborting = false;
+var rgbToHex = function (rgb) {
+  var hex = Number(rgb).toString(16);
+  if (hex.length < 2) {
+    hex = "0" + hex;
+  }
+  return hex;
+};
 
-  fs.unlink("./server/aborting.json", () => {
-    if (debug) console.log(`deleted "aborting.json" file`);
+var fullColorHex = function (r, g, b) {
+  var red = rgbToHex(r);
+  var green = rgbToHex(g);
+  var blue = rgbToHex(b);
+  return red + green + blue;
+};
+function countColors(image_path, callback) {
+  var usedColors = {};
+  Jimp.read(image_path, function (err, image) {
+    for (let y = 0; y < image.bitmap.height; y++) {
+      for (let x = 0; x < image.bitmap.width; x++) {
+        var color = Jimp.intToRGBA(image.getPixelColor(x, y));
+        var fullHex = fullColorHex(color.r, color.g, color.b);
+        var nearest = nearestColor("#" + fullHex);
+        if (typeof usedColors[nearest.value] === "undefined") {
+          usedColors[nearest.value] = 1;
+        }
+        usedColors[nearest.value] = usedColors[nearest.value] + 1;
+        if (
+          y + 2 > image.bitmap.height &&
+          x + 2 > image.bitmap.width &&
+          typeof callback === "function"
+        )
+          callback(usedColors, image);
+      }
+    }
   });
-  var gui = JSON.parse(fs.readFileSync("./server/gui.json"));
-  if (debug) console.log(`gui loaded:`, gui);
-  response.send({ done: 1 });
+}
 
-  if (gui.dither === 1) {
-    var dither = true;
-  } else {
-    var dither = false;
-  }
-  if (gui.sortColors === 1) {
-    var sortColors = true;
-  } else {
-    var sortColors = false;
-  }
-  if (gui.fast === 1) {
-    var fast = true;
-  } else {
-    var fast = false;
-  }
-  if (gui.bucket === 1) {
-    var bucket = true;
-  } else {
-    var bucket = false;
-  }
-  var resizing = true;
+function initDraw(image_path, callback) {
+  console.log("writing instructions with", image_path);
+  var drawInstructions = [[]];
+  var drawInstructionsBu = [];
 
-  var platform = gui.platform;
-  if (debug) console.log(`config for platform:`, config[platform]);
-  if (typeof config[platform] === "undefined")
-    return console.error("invalid platform");
-  var colors = config[platform].colors;
-  var nearestColor = require("nearest-color").from(colors);
+  drawInstructionsBu.push({
+    x: [config[platform].positions.topleft.x],
+    y: [config[platform].positions.topleft.y],
+    color: null,
+    type: "ins",
+  });
+  mousePos = {
+    x: parseInt(drawInstructionsBu[0].x),
+    y: parseInt(drawInstructionsBu[0].y),
+  };
 
-  var ignoringColors = "";
-  var numOfRows = gui.totallines;
-  var oneLineIs = gui.oneLineIs; // every x pixels in the painting programm a pixel of the original will be painted
-  var accuracy = gui.accuracy; // more meany less
-  var delayBetweenColors = gui.delayBetweenColors;
-
-  var ditherAccuracy = gui.ditherAccuracy;
-  //var file = './images/piano.jpg' //backround https://garticphone.com/images/bgcanvas.svg
-  var file = gui.image;
-  retry();
-  function retry() {
-    tries++;
-    //download image
-    if (resizing) {
-      if (debug) console.log(`downloading image`);
-
-      Jimp.read(file, function (err, image) {
-        if (typeof image === "undefined")
-          return console.log("Invalid image provided");
-        image.write("./server/images/downloaded_image.png");
-        file = "./server/images/downloaded_image.png";
-      });
+  countColors(image_path, (usedColors, image) => {
+    //console.log(usedColors)
+    var largest = sortOBJ(usedColors);
+    //console.log(usedColors)
+    if (sortColors) {
+      if (debug) console.log(`corting colors by size (biggest goes last)`);
+      usedColors = sortOBJBySize(usedColors);
     }
 
-    //dither
-    Jimp.read(file, function (err, image) {
-      robot.setMouseDelay(gui.speed);
-      async function dithering(cwidth, cheight) {
-        Jimp.read(file, async function (err, image2) {
-          console.log("dithering", file);
+    //console.log(largest);
 
-          let ditheredBitmap = await mcfsd(image2.bitmap, ditherAccuracy);
-          //console.log(image.bitmap)
+    if (bucket) {
+      drawInstructionsBu.push({
+        x: [config[platform].positions.fillbucket.x],
+        y: [config[platform].positions.fillbucket.y],
+        color: null,
+        type: "ins",
+      });
+      drawInstructionsBu.push({
+        x: [config[platform].positions[largest.name].x],
+        y: [config[platform].positions[largest.name].y],
+        color: null,
+        type: "ins",
+      });
+      drawInstructionsBu.push({
+        x: [mousePos.x + 10],
+        y: [mousePos.y + 10],
+        color: null,
+        type: "ins",
+      });
+      drawInstructionsBu.push({
+        x: [config[platform].positions.pen.x],
+        y: [config[platform].positions.pen.y],
+        color: null,
+        type: "ins",
+      });
+      delete usedColors[largest.name];
+      ignoringColors = largest.name;
+    } else {
+      delete usedColors[manuIgnoreColor];
+      ignoringColors = manuIgnoreColor;
+    }
+    console.log(usedColors);
 
-          let ditheredImage = await Jimp.create(ditheredBitmap);
+    var colors = [];
+    if (debug) console.log(`pushing colors to array`);
+    for (let o in usedColors) {
+      colors.push(o);
+    }
+    colors = removearr(colors, ignoringColors);
+    colors = removearr(colors, ignoringColors);
 
-          await ditheredImage.writeAsync(`./server/images/dithered_image.png`);
-          setTimeout(() => {
-            file = `./server/images/dithered_image.png`;
-            draw(cwidth, cheight, file);
-          }, 100);
+    //return console.log(colors);
+    var iy = 0
+    if (debug) console.log("color array:", colors);
+    for (let y = 0; y < image.bitmap.height; y += accuracy) {
+      iy++
+      for (let x = 0; x < image.bitmap.width; x += accuracy) {
+        var color = Jimp.intToRGBA(image.getPixelColor(x, y));
+        if (color.a == 0) continue
+        var fullHex = fullColorHex(color.r, color.g, color.b);
+        var nearest = nearestColor("#" + fullHex);
+        if (y >= totallines) continue;
+        if (nearest.value === ignoringColors) continue;
+        if (typeof drawInstructions[iy] === 'undefined') drawInstructions[iy] = []
+        drawInstructions[iy].push({
+          x: [x * oneLineIs],
+          y: [y * oneLineIs],
+          //y: [y * (oneLineIs - 0.45)],
+          color: nearest.value,
         });
       }
-      async function resize() {
-        console.log("resizing", file);
-        var w = Math.round(
-          (config[platform].positions.bottomright.x -
-            config[platform].positions.topleft.x) /
-            oneLineIs
-        );
-        var h = Math.round(
-          (config[platform].positions.bottomright.y -
-            config[platform].positions.topleft.y) /
-            oneLineIs
-        );
-        console.log("max dimentions:", w, h);
-        //Jimp.read(file, function (err, im) {
-        var newWidth, newHeight, tempnewWidth, tempnewHeight, canDraw, type;
-        async function maxSize(mwidth, mheight, cwidth, cheight) {
-          if (
-            typeof newHeight === "undefined" ||
-            typeof newWidth === "undefined"
-          ) {
-            newHeight = cheight;
-            newWidth = cwidth;
-            tempnewHeight = cheight;
-            tempnewWidth = cwidth;
-          }
-          if (cwidth < mwidth || cheight < mheight) {
-            if (typeof resizingFactor !== "undefined") {
-              tempnewWidth = Math.round(cwidth + resizingFactor);
-              tempnewHeight = Math.round(cheight + resizingFactor);
-            } else {
-              tempnewWidth = Math.round(cwidth * 1.05);
-              tempnewHeight = Math.round(cheight * 1.05);
-            }
-            if (tempnewHeight > mheight || tempnewWidth > mwidth) {
-              canDraw = true;
-            } else {
-              type = "max";
-
-              setTimeout(() => {
-                console.log(
-                  "resizing to:",
-                  tempnewWidth,
-                  tempnewHeight,
-                  "(maximising)"
-                );
-
-                maxSize(mwidth, mheight, tempnewWidth, tempnewHeight);
-              }, resizeDelay);
-            }
-          }
-          //else {
-
-          if (cwidth > mwidth || cheight > mheight) {
-            if (typeof resizingFactor !== "undefined") {
-              newWidth = Math.round(cwidth - resizingFactor);
-              newHeight = Math.round(cheight - resizingFactor);
-            } else {
-              newWidth = Math.round(cwidth / 1.05);
-              newHeight = Math.round(cheight / 1.05);
-            }
-            type = "min";
-            canDraw = false;
-            setTimeout(() => {
-              console.log("resizing to:", newWidth, newHeight, "(minimising)");
-
-              maxSize(mwidth, mheight, newWidth, newHeight);
-            }, resizeDelay);
-          } else {
-            //console.log('can draw:', canDraw,'type:', type)
-            if (type === "min") {
-              canDraw = true;
-            }
-          }
-          if (canDraw) {
-            if (file.startsWith("http")) {
-              if (debug)
-                console.log(`error while downloading (file startswith http)`);
-              console.log("retrying");
-              retry();
-              return;
-            } else {
-              if (cwidth <= 0 || cheight <= 0)
-                return console.log("can't process that image");
-              var newImage = await resizeImg(fs.readFileSync(file), {
-                width: cwidth,
-                height: cheight,
-              });
-
-              fs.writeFileSync(
-                "./server/images/resized_image.png",
-                newImage,
-                (err) => {
-                  if (err) throw err;
-                }
-              );
-              file = "./server/images/resized_image.png";
-              //setTimeout(() => {
-
-              if (dither) {
-                dithering(cwidth, cheight);
-              } else {
-                draw(cwidth, cheight, file);
-              }
-              //}, 100);
-            }
-          }
-        }
-
-        //}
-        maxSize(w, h, image.bitmap.width, image.bitmap.height);
-      }
-
-      resize();
-      //draw(undefined, undefined, 'https://cdn.discordapp.com/attachments/827874027434672158/832279156317356052/unknown.png')
-
-      //})
-      //});
-    });
-  }
-  async function draw(cwidth, cheight, file) {
-    //console.log('final output:', cwidth, cheight)
-    if (file.startsWith("./server/images/downloaded_image.png")) {
-      console.log("retrying");
-      retry();
-      return;
-    } else {
-      console.log(`${tries} tries`);
-      tries = 0;
     }
 
-    //return console.log('drawing now');
-    //return console.log('drawing with', file)
+    if (typeof callback === "function")
+      callback(drawInstructions, drawInstructionsBu, usedColors);
+  });
+}
+function sortDraw(drawInstructions, drawInstructionsBu, colors, callback) {
+  var newins = [],
+    di,
+    ly = 0,
+    looping,
+    lines = 0,
+    nc,
+    nextlines = 1,
+    ni = -1,
+    lc = "";
 
-    //return
+  //console.log("di", drawInstructions[0]);
+  for (let c in colors) {
+    ly = 0;
+    nextlines = 1;
+    if (c === ignoringColors) continue;
+    ni = 0;
+    newins.push({
+      x: [config[platform].positions[c].x],
+      y: [config[platform].positions[c].y],
+      color: null,
+    });
 
-    console.log("i would use", file);
-    //return
-    Jimp.read(file, function (err, image) {
-      //console.log(image)
-      //setTimeout(() => {
-
-      robot.moveMouse(
-        config[platform].positions.topleft.x,
-        config[platform].positions.topleft.y
-      );
-      setTimeout(() => {
-        robot.mouseClick();
-      }, 20);
-
-      //image.getPixelColour
-      var mousePos = robot.getMousePos();
-      if (debug) console.log(`current mose pos:`, mousePos);
-
-      //init colors
-      if (debug) console.log(`initializing colors`);
-      var usedColors = {};
-      //var lines = {}
-      for (let y = 0; y < image.bitmap.height; y++) {
-        for (let x = 0; x < image.bitmap.width; x++) {
-          var color = Jimp.intToRGBA(image.getPixelColor(x, y));
-          var fullHex = fullColorHex(color.r, color.g, color.b);
-          var nearest = nearestColor("#" + fullHex);
-          //console.log(nearest.value)
-          if (typeof usedColors[nearest.value] === "undefined") {
-            usedColors[nearest.value] = 1;
-          }
-          usedColors[nearest.value] = usedColors[nearest.value] + 1;
+    for (let y in drawInstructions) {
+      for (let x in drawInstructions[y]) {
+        x = parseInt(x)
+        y = parseInt(y)
+        di = drawInstructions[y][x]
+        if (di.color === null) {
+          //console.log('di', di)
+          newins.push({
+            x: [di.x[0]],
+            y: [di.y[0]],
+            color: null,
+          });
+          continue;
         }
-      }
-      var largest = sortOBJ(usedColors);
-      //robot.mouseToggle('down')
-      //robot.dragMouse(mousePos.x + 200, mousePos.y)
-      //robot.mouseToggle('up')
-      //draw
-      //return console.log(usedColors);
+        nextlines--
+        looping = true
+        if (nextlines <= 0) {
 
-      //console.log(file)
-      console.log(platform);
-      //return
-      if (sortColors) {
-        if (debug) console.log(`corting colors by size (biggest goes last)`);
-        usedColors = sortOBJBySize(usedColors);
-      }
-
-      setTimeout(() => {
-        if (bucket) {
-          if (debug) console.log(`bucketing`);
-
-          robot.moveMouse(
-            config[platform].positions.fillbucket.x,
-            config[platform].positions.fillbucket.y
-          );
-          setTimeout(() => {
-            robot.mouseClick();
-            setTimeout(() => {
-              robot.moveMouse(
-                config[platform].positions[largest.name].x,
-                config[platform].positions[largest.name].y
-              );
-              setTimeout(() => {
-                robot.mouseClick();
-                setTimeout(() => {
-                  robot.moveMouse(mousePos.x + 10, mousePos.y + 10);
-                  setTimeout(() => {
-                    robot.mouseClick();
-                    setTimeout(() => {
-                      robot.moveMouse(
-                        config[platform].positions.pen.x,
-                        config[platform].positions.pen.y
-                      );
-                      setTimeout(() => {
-                        robot.mouseClick();
-                      }, 20);
-                    }, 20);
-                  }, 20);
-                }, 20);
-              }, 20);
-            }, 20);
-          }, 20);
-          ignoringColors = largest.name;
-        } else {
-          //ignoringColors = '#ffffff'
-          ignoringColors = "";
-        }
-
-        //return
-        setTimeout(() => {
-          console.log(usedColors);
-
-          function next(a) {
-            if (debug) console.log(`drawing with new color:`, a);
-            nextline = 1;
-
-            for (let y = 0; y < image.bitmap.height; y += accuracy) {
-              if (fs.existsSync("./server/aborting.json")) {
-                aborting = true;
-              }
-              for (let x = 0; x < image.bitmap.width; x += accuracy) {
-                //nextline = 0
-                nextline--;
-                //if (x > nextline) break
-                if (y >= numOfRows) continue;
-                var color = Jimp.intToRGBA(image.getPixelColor(x, y));
-                var fullHex = fullColorHex(color.r, color.g, color.b);
-                var nearest = nearestColor("#" + fullHex);
-                var looping;
-
-                if (nextline <= 0) {
-                  if (nearest.value === ignoringColors || aborting) continue;
-                  if (nearest.value !== a) continue;
-                  if (fast) {
-                    var colornext = Jimp.intToRGBA(
-                      image.getPixelColor(x + 1, y)
-                    );
-                    var fullHexnext = fullColorHex(
-                      colornext.r,
-                      colornext.g,
-                      colornext.b
-                    );
-                    var nearestnext = nearestColor("#" + fullHexnext);
-                    if (nearestnext.value === nearest.value) {
-                      looping = true;
-                      var lines = 0;
-                      let nextc;
-                      let nexth;
-                      let nextnc;
-                      if (debug) console.log(`getting draging information`);
-                      for (let l = 1; looping; l += 1) {
-                        //console.log('calculating', lines)
-                        if (x + l > image.bitmap.width) {
-                          lines = l;
-                          looping = false;
-                          continue;
-                        }
-                        nextc = Jimp.intToRGBA(image.getPixelColor(x + l, y));
-                        nexth = fullColorHex(nextc.r, nextc.g, nextc.b);
-                        nextnc = nearestColor("#" + nexth);
-                        if (a !== nextnc.value) {
-                          lines = l;
-                          looping = false;
-                        }
-                      }
-
-                      if (debug)
-                        console.log(
-                          `draging from `,
-                          mousePos.x + x * oneLineIs,
-                          mousePos.y + y * oneLineIs,
-                          "to",
-                          mousePos.x + (x + lines - 1) * oneLineIs,
-                          mousePos.y + y * oneLineIs,
-                          `(${lines} pixels)`
-                        );
-                      robot.moveMouse(
-                        mousePos.x + x * oneLineIs,
-                        mousePos.y + y * oneLineIs
-                      );
-                      robot.mouseToggle("down");
-                      robot.dragMouse(
-                        mousePos.x + (x + lines - 1) * oneLineIs,
-                        mousePos.y + y * oneLineIs
-                      );
-                      robot.mouseToggle("up");
-                      //console.log('draging', lines)
-                      //nextline = 0
-                      nextline = lines;
-                    } else {
-                      if (debug)
-                        console.log(
-                          `dotting at`,
-                          mousePos.x + (x * oneLineIs - 1),
-                          mousePos.y + (y * oneLineIs - 1)
-                        );
-                      nextline = 0;
-                      robot.moveMouse(
-                        mousePos.x + (x * oneLineIs - 1),
-                        mousePos.y + (y * oneLineIs - 1)
-                      );
-                      robot.mouseClick();
-                    }
-                  } else {
-                    if (debug) console.log(`dotting`);
-                    robot.moveMouse(
-                      mousePos.x + (x * oneLineIs - 1),
-                      mousePos.y + (y * oneLineIs - 1)
-                    );
-                    robot.mouseClick();
-                  }
+          if (fast) {
+            if (di.color === c) {
+              for (let l = 0; looping; l++) {
+                nc = drawInstructions[y][x + l + 1]?.color
+                if (x == drawInstructions[y].length - 1) {
+                  //last pixel in color
+                  looping = false
+                  lines = l
+                  continue
+                }
+                if (nc !== c) {
+                  lines = l
+                  looping = false
                 }
               }
+              newins.push({
+                x: [
+                  mousePos.x + di.x[0],
+                  mousePos.x + (di.x[0] + lines * oneLineIs * accuracy + 1),
+                ],
+                y: [mousePos.y + di.y[0], mousePos.y + di.y[0]],
+                color: c,
+              });
+              nextlines = lines;
             }
           }
-          var colors = [];
-          if (debug) console.log(`pushing colors to array`);
-          for (let o in usedColors) {
-            colors.push(o);
+          else {
+            if (di.color == c) {
+              nextline = 0;
+              newins.push({
+                x: [mousePos.x + di.x[0]],
+                y: [mousePos.y + di.y[0]],
+                color: c,
+              })
+            }
           }
-          if (debug) console.log("color array:", colors);
-          var temp = -1;
-          function z() {
-            temp++;
-            if (temp >= colors.length || aborting)
-              return (
-                console.log("Done!!!"),
-                console.log(`
+        }
+      }
+    }
+  }
+  var output = newins,
+    ind = -1,
+    ins = 0;
+  for (let a in drawInstructionsBu) {
+    if (drawInstructionsBu[a].type == "ins") {
+      output = addElementToArray(ins, drawInstructionsBu[a], output);
+      ins++;
+    } else {
+      output = addElementToArray(ind + 1, drawInstructionsBu[a], output);
+    }
+    ind++;
+  }
+  if (typeof callback === "function") {
+    callback(output);
+  }
+}
+function draw(drawInstructions) {
+  var deta = new Eta(Math.round(drawInstructions.length / 100));
+  deta.start();
+  var di,
+    drag,
+    co = 0,
+    co2 = 0,
+    color = "",
+    lc = "";
+  for (let c in drawInstructions) {
+    c = parseInt(c);
+    if (aborting) continue;
+    di = drawInstructions[c];
+    if (typeof di.x[1] === "undefined") drag = false;
+    else drag = true;
+    if (lc !== di.color && di.color !== null) color = di.color;
+    if (drag) {
+      robot.moveMouse(di.x[0], di.y[0]);
+      robot.mouseToggle("down");
+      robot.dragMouse(di.x[1], di.y[1]);
+      robot.mouseToggle("up");
+    } else {
+      robot.moveMouse(di.x[0], di.y[0]);
+      robot.mouseClick();
+    }
+    co++;
+    co2++;
+    if (co >= 20) {
+      //console.log(percent(c, drawInstructions.length));
+      co = 0;
+      if (fs.existsSync("./server/aborting.json")) {
+        aborting = true;
+      }
+    }
+    if (co2 >= 100) {
+      co2 = 0;
+      deta.iterate(1);
+      printProgress(
+        color,
+        percent(c + 1, drawInstructions.length),
+        deta.format(
+          "elapsed time: {{elapsed}}seconds, expected rest time: {{etah}}"
+        )
+      );
+    }
+    if (c + 1 >= drawInstructions.length) {
+      printProgress("Done", 100, deta.format("took {{elapsed}} seconds and", tries, 'tries'));
+      console.log("\n");
+      console.log(`
                         *----------------------------*
                         |                            |
                         |   drawbot by mrballou      |   
@@ -509,35 +601,65 @@ app.get("/draw", (request, response) => {
                         |   patreon.com/mrballou     |
                         |                            |
                         |                            |
-                        *----------------------------*`)
-              );
-            console.log(colors[temp]);
-            robot.moveMouse(
-              config[platform].positions[colors[temp]].x,
-              config[platform].positions[colors[temp]].y
-            );
-            robot.mouseClick();
-            previusColor = colors[temp];
-            if (usedColors[largest.name] === colors[temp]) {
-            } else {
-              next(colors[temp]);
-              if (aborting) {
-                z();
-              } else {
-                if (debug)
-                  console.log(`waiting`, delayBetweenColors, "milliseconds");
-                setTimeout(() => {
-                  z();
-                }, delayBetweenColors);
-              }
-            }
-          }
-          z();
-          //console.log('Done!!!')
-        }, 1000);
-      }, 200);
-
-      //}, 2500);
-    });
+                        *----------------------------*`);
+    }
+    lc = di.color;
   }
-});
+}
+function percent(x, y) {
+  return parseFloat((x * 100) / y).toFixed(2);
+}
+function printProgress(c, progress, resttime = "") {
+  process.stdout.clearLine();
+  process.stdout.cursorTo(0);
+  process.stdout.write(c + "(" + progress + "%" + ")" + resttime);
+}
+function addElementToArray(index, element, arr) {
+  var newArr = [];
+  for (let i in arr) {
+    if (i == index) {
+      newArr.push(element);
+      newArr.push(arr[i]);
+    } else {
+      newArr.push(arr[i]);
+    }
+  }
+  return newArr;
+}
+function objSize(obj) {
+  var c = 0;
+  for (let i in obj) {
+    c++;
+  }
+
+  return c;
+}
+function removearr(arr, value) {
+  var newarr = [];
+  for (let i of arr) {
+    if (i !== value) {
+      newarr.push(i);
+    }
+  }
+  return newarr;
+}
+function sort(value, large) {
+  var newValue = {},
+    size = objSize(value),
+    temp = {};
+  for (let c = 0; c < size; c++)
+    if (large) {
+      for (let i in value) {
+      }
+    }
+  return newValue;
+}
+function hexToRgb(hex) {
+  var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? {
+    r: parseInt(result[1], 16),
+    g: parseInt(result[2], 16),
+    b: parseInt(result[3], 16)
+  } : null;
+}
+main();

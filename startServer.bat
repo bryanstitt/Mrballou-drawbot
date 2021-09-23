@@ -1,3 +1,3 @@
 echo off
-run.exe
+node ./server/index.js
 pause

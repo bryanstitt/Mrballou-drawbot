@@ -10,21 +10,21 @@ readline.question(`What game? `, (w) => {
     console.log('registred', w)
     console.log('note! to end this just ctrl + c the script')
     console.log('Hover over the top left of the drawing canvas')
-    
+
     setTimeout(() => {
-        
+
         function a() {
             count++
             fs.readFile('./config.json', (err, data) => {
                 data = JSON.parse(data)
                 var game = w;
                 //console.log(data)
-                
-                
-                
+
+
+
                 var pos = robot.getMousePos();
                 var color = robot.getPixelColor(pos.x, pos.y);
-                
+
                 if (typeof data[game] === 'undefined') {
                     data[game] = { positions: {}, colors: {} }
                 }
@@ -37,13 +37,13 @@ readline.question(`What game? `, (w) => {
                         console.log('hover over the bottom right of the drawing canvas')
 
                         break;
-                        case 2:
-                            data[game].positions.bottomright = {
-                                x: pos.x,
-                                y: pos.y
-                            }
-                            console.log('hover over the pen')
-                            break
+                    case 2:
+                        data[game].positions.bottomright = {
+                            x: pos.x,
+                            y: pos.y
+                        }
+                        console.log('hover over the pen')
+                        break
                     case 3:
                         data[game].positions.pen = {
                             x: pos.x,
@@ -51,13 +51,13 @@ readline.question(`What game? `, (w) => {
                         }
                         console.log('Hover over the fill bucket')
                         break;
-                        
-                        case 4:
-                            data[game].positions.fillbucket = {
-                                x: pos.x,
-                                y: pos.y
-                            }
-                            console.log('Hover over every possible color that the bot can choose')
+
+                    case 4:
+                        data[game].positions.fillbucket = {
+                            x: pos.x,
+                            y: pos.y
+                        }
+                        console.log('Hover over every possible color that the bot can choose')
                         break;
 
                     default:

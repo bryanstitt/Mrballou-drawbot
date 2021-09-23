@@ -20,6 +20,13 @@ defaultValues = {"platform": "skribbl",
                  "fast": 1,
                  "bucket": 1}
 
+dropdownValues = []
+f = open("./server/config.json", "r")
+for d in json.load(f):
+    dropdownValues.append(d)
+    print(d)
+
+
 
 URL = 'http://localhost:49152/draw'
 
@@ -27,7 +34,7 @@ URL = 'http://localhost:49152/draw'
 def windowopener():
 
     def draw():
-        if e1.get() == '' or e1.get() == '' or e2.get() == '' or e3.get() == '' or e4.get() == '' or e5.get() == '' or e6.get() == '' or num.get == '':
+        if e1.get() == '' or e1.get() == ''  or e3.get() == '' or e4.get() == '' or e5.get() == '' or e6.get() == '' or num.get == '':
 
             w = tk.Label(
                 window, text="ERROR! at least one value is empty", fg='red')
@@ -60,7 +67,8 @@ def windowopener():
 
             f = open("./server/gui.json", "w")
             json.dump({
-                "platform": e2.get(),
+                # "platform": e2.get(),
+                "platform": dropdown.get(),
                 "image": image,
                 "speed": float(e3.get()),
                 "oneLineIs": float(e4.get()),
@@ -71,7 +79,8 @@ def windowopener():
                 "sortColors": box.get(),
                 "delayBetweenColors":  float(delay.get()),
                 "fast": resizing.get(),
-                "bucket": bucket.get()
+                "bucket": bucket.get(),
+                "ignoreColor": ignoreColor.get()
             }, f)
             f.close()
             requests.get(url=URL, params={})
@@ -79,48 +88,60 @@ def windowopener():
     window = tk.Tk()
 
     window.title('Drawbot by mrballou')
+    dropdown = tk.StringVar(window)
 
-    tk.Label(window, text="platform").grid(row=0)
-    tk.Label(window, text="speed").grid(row=1)
-    tk.Label(window, text="one line is").grid(row=2)
-    tk.Label(window, text="accuracy").grid(row=3)
-    tk.Label(window, text="ditherAccuracy").grid(row=4)
-    tk.Label(window, text="total lines").grid(row=7)
-    tk.Label(window, text="Delay between colors").grid(row=8)
-    tk.Label(window, text="Image URL").grid(row=9)
+    opt = tk.OptionMenu(window, dropdown, *dropdownValues)
+    opt.config(height=1)
+    
+    opt.bind()
+    opt.place(x=116, y=0)
+
+    tk.Label(window, text="Platform").grid(row=0)
+    tk.Label(window, text="Speed").grid(row=1)
+    tk.Label(window, text="One line is").grid(row=2)
+    tk.Label(window, text="Accuracy").grid(row=3)
+    tk.Label(window, text="DitherAccuracy").grid(row=4)
+    tk.Label(window, text="Ignore color").grid(row=7)
+    tk.Label(window, text="Total lines").grid(row=8)
+    tk.Label(window, text="Delay between colors").grid(row=9)
+    tk.Label(window, text="Image URL").grid(row=10)
 
     e1 = tk.Entry(window)
-    e2 = tk.Entry(window)
     e3 = tk.Entry(window)
     e4 = tk.Entry(window)
     e5 = tk.Entry(window)
     e6 = tk.Entry(window)
     num = tk.Entry(window)
     delay = tk.Entry(window)
+    ignoreColor = tk.Entry(window)
 
     s = open("./server/gui.json", "r")
     data = json.load(s)
+
+    
 
     # print(data['image'])
 
     e1.insert(
         0, data['image'])
-    e2.insert(0, data['platform'])
+    #e2.insert(0, data['platform'])
+    dropdown.set(data['platform'])
     e3.insert(0, data['speed'])
     e4.insert(0, data['oneLineIs'])
     e5.insert(0, data['accuracy'])
     e6.insert(0, data['ditherAccuracy'])
     num.insert(0, data['totallines'])
     delay.insert(0, data['delayBetweenColors'])
+    ignoreColor.insert(0, data['ignoreColor'])
 
-    e1.grid(row=9, column=1)
-    e2.grid(row=0, column=1)
+    e1.grid(row=10, column=1)
     e3.grid(row=1, column=1)
     e4.grid(row=2, column=1)
     e5.grid(row=3, column=1)
     e6.grid(row=4, column=1)
-    num.grid(row=7, column=1)
-    delay.grid(row=8, column=1)
+    num.grid(row=8, column=1)
+    delay.grid(row=9, column=1)
+    ignoreColor.grid(row=7, column=1)
 
     dithering = tk.IntVar()
     tk.Checkbutton(window, text="Dither",
