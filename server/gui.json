@@ -1,5 +1,5 @@
 {
-  "platform": "skribbl",
+  "platform": "-----",
   "image": "https://cdn.discordapp.com/attachments/818941739535564811/825802466498576402/unknown.png",
   "speed": 1.0,
   "oneLineIs": 2.0,
@@ -11,5 +11,6 @@
   "delayBetweenColors": 0.0,
   "fast": 1,
   "bucket": 1,
-  "ignoreColor": "#ffffff"
+  "ignoreColor": "#ffffff",
+  "ditherAlgorithm": "mcfsd"
 }

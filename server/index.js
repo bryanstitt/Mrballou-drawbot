@@ -11,6 +11,7 @@ const mcfsd = require("mcfsd");
 const express = require("express");
 const Eta = require("node-eta");
 const DitherJS = require('ditherjs/server');
+const hound = require('hound');
 
 /*
 
@@ -42,12 +43,27 @@ var resizeSteps = 1,
   manuIgnoreColor,
   aborting = false,
   mousePos,
-  tries = 0;
+  tries = 0,
+  dragNDFolder = './server/dragNdropImages'
+
 function main() {
   var port = 49152;
   var nextline;
   //var resizingFactor = 1
   var resizeDelay = 5;
+  if (!fs.existsSync(dragNDFolder)) fs.mkdirSync(dragNDFolder)
+  if (!fs.existsSync('./server/images')) fs.mkdirSync('./server/images')
+
+  console.log(`Watching for file changes on ${dragNDFolder}`);
+  var watcher = hound.watch(dragNDFolder)
+  watcher.on('create', function (file, stats) {
+    console.log(file + ' was created')
+    startDraw(undefined, file)
+  })
+  watcher.on('change', function (file, stats) {
+    console.log(file + ' was changed')
+    startDraw(undefined, file)
+  })
 
   const app = express();
   app.listen(port, () => {
@@ -60,89 +76,94 @@ function main() {
   if (debug) console.log(`config loaded:`, config);
 
   app.get("/draw", (request, response) => {
-    tries = 0
-    response.send({});
-    function try_() {
-      tries++
-      var eta = new Eta(5);
-      eta.start();
-      //console.log('got instructions')
-      if (debug) console.log(`got instruction to draw`);
-      if (debug) console.log(`loaded config:`, config);
-      aborting = false;
+    startDraw(response)
+  });
+}
+function startDraw(response, nurl) {
+  tries = 0
+  if (response) response.send({});
+  function try_() {
+    tries++
+    var eta = new Eta(5);
+    eta.start();
+    //console.log('got instructions')
+    if (debug) console.log(`got instruction to draw`);
+    if (debug) console.log(`loaded config:`, config);
+    aborting = false;
 
-      fs.unlink("./server/aborting.json", () => {
-        if (debug) console.log(`deleted "aborting.json" file`);
-      });
-      var gui = JSON.parse(fs.readFileSync("./server/gui.json"));
-      if (debug) console.log(`gui loaded:`, gui);
+    fs.unlink("./server/aborting.json", () => {
+      if (debug) console.log(`deleted "aborting.json" file`);
+    });
+    var gui = JSON.parse(fs.readFileSync("./server/gui.json"));
+    if (debug) console.log(`gui loaded:`, gui);
 
-      dither = gui.dither;
-      sortColors = gui.sortColors;
-      fast = gui.fast;
-      bucket = gui.bucket;
+    dither = gui.dither;
+    sortColors = gui.sortColors;
+    fast = gui.fast;
+    bucket = gui.bucket;
 
-      var { image, speed } = gui;
-      delayBetweenColors = gui.delayBetweenColors;
-      accuracy = gui.accuracy;
-      totallines = gui.totallines;
-      oneLineIs = gui.oneLineIs;
-      platform = gui.platform;
-      ditherAccuracy = gui.ditherAccuracy;
-      manuIgnoreColor = gui.ignoreColor
-      robot.setMouseDelay(speed);
-      if (debug) console.log(`config for platform:`, config[platform]);
-      if (typeof config[platform] === "undefined")
-        return console.error("invalid platform");
-      colors = config[platform].colors;
-      //console.log(colors)
-      nearestColor = require("nearest-color").from(colors);
-      eta.iterate("index complete");
+    var { image, speed } = gui;
+    if (nurl) image = nurl
+    delayBetweenColors = gui.delayBetweenColors;
+    accuracy = gui.accuracy;
+    totallines = gui.totallines;
+    oneLineIs = gui.oneLineIs;
+    platform = gui.platform;
+    ditherAccuracy = gui.ditherAccuracy;
+    manuIgnoreColor = gui.ignoreColor
+    ditherAlgorithm = gui.ditherAlgorithm;
+    robot.setMouseDelay(speed);
+    if (debug) console.log(`config for platform:`, config[platform]);
+    if (typeof config[platform] === "undefined")
+      return console.error("invalid platform");
+    colors = config[platform].colors;
+    //console.log(colors)
+    nearestColor = require("nearest-color").from(colors);
+    eta.iterate("index complete");
 
-      //console.log(nearestColor)
+    //console.log(nearestColor)
 
-      download(image, (error, file) => {
-        if (error) {
-          console.log(error, 'try', tries)
-          if (tries >= retries) {
-            console.log('retrying aborted with', tries, 'tries')
-            return
-          }
-          try_()
+    download(image, (error, file) => {
+      if (error) {
+        console.log(error, 'try', tries)
+        if (tries >= retries) {
+          console.log('retrying aborted with', tries, 'tries')
           return
         }
-        eta.iterate("download complete");
+        try_()
+        return
+      }
+      eta.iterate("download complete");
+      console.log(eta.format("elapsed time: {{elapsed}}seconds, expected rest time: {{etah}}"));
+
+
+      resize(file, (file) => {
+        eta.iterate("resize complete");
         console.log(eta.format("elapsed time: {{elapsed}}seconds, expected rest time: {{etah}}"));
 
 
-        resize(file, (file) => {
-          eta.iterate("resize complete");
-          console.log(eta.format("elapsed time: {{elapsed}}seconds, expected rest time: {{etah}}"));
+        dither_(file, (file) => {
+
+          initDraw(file, (drawInstructions, drawInstructionsBu, usedColors) => {
+            //console.log(drawInstructions)
+            eta.iterate("initing complete");
+            console.log(eta.format("elapsed time: {{elapsed}}seconds, expected rest time: {{etah}}"));
 
 
-          dither_(file, (file) => {
-
-            initDraw(file, (drawInstructions, drawInstructionsBu, usedColors) => {
-              //console.log(drawInstructions)
-              eta.iterate("initing complete");
+            sortDraw(drawInstructions, drawInstructionsBu, usedColors, (drawInstructions) => {
+              eta.iterate("sort complete");
               console.log(eta.format("elapsed time: {{elapsed}}seconds, expected rest time: {{etah}}"));
-
-
-              sortDraw(drawInstructions, drawInstructionsBu, usedColors, (drawInstructions) => {
-                eta.iterate("sort complete");
-                console.log(eta.format("elapsed time: {{elapsed}}seconds, expected rest time: {{etah}}"));
-                console.log("done initializing");
-                //console.log(drawInstructions);
-                draw(drawInstructions);
-              }
-              );
-            });
+              console.log("done initializing");
+              //console.log(drawInstructions);
+              draw(drawInstructions);
+            }
+            );
           });
         });
       });
-    }
-    try_()
-  });
+    });
+  }
+  try_()
 }
 
 function download(link, callback) {
@@ -165,36 +186,52 @@ function dither_(image_path, callback) {
   if (dither) {
     console.log("dithering", image_path);
     //console.log(config[platform])
-    var ditherArray = [];
-    for (let c in config[platform].colors) {
-      ditherArray.push([])
-      var hex = config[platform].colors[c]
-      var rgb = hexToRgb(hex)
-      ditherArray[ditherArray.length - 1].push(rgb.r, rgb.g, rgb.b)
+    if (ditherAlgorithm == 'mcfsd') {
+      Jimp.read(image_path).then((image) => {
+        mcfsd(image.bitmap, ditherAccuracy).then(ditheredBitmap => {
+
+
+          Jimp.create(ditheredBitmap).then((ditheredImage) => {
+
+
+            ditheredImage.writeAsync(`./server/images/dithered_image.png`).then(() => {
+              callback(`./server/images/dithered_image.png`)
+            })
+          })
+        })
+      })
     }
-    console.log(ditherArray)
+    else {
+      var ditherArray = [];
+      for (let c in config[platform].colors) {
+        ditherArray.push([])
+        var hex = config[platform].colors[c]
+        var rgb = hexToRgb(hex)
+        ditherArray[ditherArray.length - 1].push(rgb.r, rgb.g, rgb.b)
+      }
+      if (debug) console.log(ditherArray)
 
-    var buffer = fs.readFileSync(image_path)
-    var options = {
-      "step": ditherAccuracy, // The step for the pixel quantization n = 1,2,3...
-      "palette": ditherArray, // an array of colors as rgb arrays
-      "algorithm": "atkinson" // one of ["ordered", "diffusion", "atkinson"]
-    };
+      var buffer = fs.readFileSync(image_path)
+      var options = {
+        "step": ditherAccuracy, // The step for the pixel quantization n = 1,2,3...
+        "palette": ditherArray, // an array of colors as rgb arrays
+        "algorithm": ditherAlgorithm // one of ["ordered", "diffusion", "atkinson"] // atkinson default
+      };
+      var ditherjs = new DitherJS(options)
 
-    var ditherjs = new DitherJS(options);
 
+      // Get a buffer that can be loaded into a canvas
+      //console.log(buffer)
 
-    // Get a buffer that can be loaded into a canvas
-    //console.log(buffer)
+      var newBuffer = ditherjs.dither(buffer, options)
 
-    var newBuffer = ditherjs.dither(buffer, options)
-
-    fs.writeFileSync(`./server/images/dithered_image.png`, newBuffer)
-    if (typeof callback === 'function') callback(`./server/images/dithered_image.png`)
-
+      fs.writeFileSync(`./server/images/dithered_image.png`, newBuffer)
+      if (typeof callback === 'function') callback(`./server/images/dithered_image.png`)
+    }
   } else {
     if (typeof callback === "function") callback(image_path);
   }
+
 }
 function resize(image_path, callback) {
   console.log("resizing", image_path);

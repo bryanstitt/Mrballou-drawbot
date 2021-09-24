@@ -2,23 +2,10 @@ import tkinter as tk
 import requests
 import json
 import threading
-import pynput
 from pynput.keyboard import Key, Listener
-#from icrawler.builtin import GoogleImageCrawler
 import os
-#from PIL import ImageTk, Image
-defaultValues = {"platform": "skribbl",
-                 "image": "https://cdn.discordapp.com/attachments/818941739535564811/825802466498576402/unknown.png",
-                 "speed": 1.0,
-                 "oneLineIs": 2.0,
-                 "accuracy": 1.0,
-                 "dither": 0,
-                 "ditherAccuracy": 2.0,
-                 "totallines": 999999.0,
-                 "sortColors": 1,
-                 "delayBetweenColors": 0.0,
-                 "fast": 1,
-                 "bucket": 1}
+
+ditherAlgorithms = ["ordered", "diffusion", "atkinson", "mcfsd"]
 
 dropdownValues = []
 f = open("./server/config.json", "r")
@@ -42,27 +29,6 @@ def windowopener():
 
         else:
 
-            # if googleImageing.get() == 1:
-            #    f = open('./server/config.json')
-            #    data = json.load(f)
-            #    #data = json.loads(data)
-            #    platform = e2.get()
-            #    print(platform)
-            #    #print (data["paint"]["positions"])
-            #
-            #    maxSize = {
-            #        "w": (data[platform]["positions"]["bottomright"]["x"] - data[platform]["positions"]["topleft"]["x"]) / float(e4.get()),
-            #        "h": (data[platform]["positions"]["bottomright"]["y"] - data[platform]["positions"]["topleft"]["y"]) / float(e4.get())
-            #    }
-            #
-            #    print(maxSize)
-            #    google_crawler = GoogleImageCrawler(
-            #        storage={'root_dir': './server/google images'})
-            #    google_crawler.crawl(
-            #        keyword=e1.get(), max_num=5, max_size=(maxSize["w"], maxSize["h"]))
-            #
-            #    image = './server/google images/000001.png'
-            # else:
             image = e1.get()
 
             f = open("./server/gui.json", "w")
@@ -80,7 +46,8 @@ def windowopener():
                 "delayBetweenColors":  float(delay.get()),
                 "fast": resizing.get(),
                 "bucket": bucket.get(),
-                "ignoreColor": ignoreColor.get()
+                "ignoreColor": ignoreColor.get(),
+                "ditherAlgorithm":  ditherAlg.get()
             }, f)
             f.close()
             requests.get(url=URL, params={})
@@ -89,6 +56,13 @@ def windowopener():
 
     window.title('Drawbot by mrballou')
     dropdown = tk.StringVar(window)
+    ditherAlg = tk.StringVar(window)
+
+    dtha = tk.OptionMenu(window, ditherAlg, *ditherAlgorithms)
+    dtha.config(height=1)
+    
+    dtha.bind()
+    dtha.place(x=116, y=150)
 
     opt = tk.OptionMenu(window, dropdown, *dropdownValues)
     opt.config(height=1)
@@ -101,10 +75,11 @@ def windowopener():
     tk.Label(window, text="One line is").grid(row=2)
     tk.Label(window, text="Accuracy").grid(row=3)
     tk.Label(window, text="DitherAccuracy").grid(row=4)
-    tk.Label(window, text="Ignore color").grid(row=7)
-    tk.Label(window, text="Total lines").grid(row=8)
-    tk.Label(window, text="Delay between colors").grid(row=9)
-    tk.Label(window, text="Image URL").grid(row=10)
+    tk.Label(window, text="Ignore color").grid(row=8)
+    tk.Label(window, text="Total lines").grid(row=9)
+    tk.Label(window, text="Delay between colors").grid(row=10)
+    tk.Label(window, text="Image URL").grid(row=11)
+    tk.Label(window, text="Dither Algorithm").grid(row=7)
 
     e1 = tk.Entry(window)
     e3 = tk.Entry(window)
@@ -114,6 +89,7 @@ def windowopener():
     num = tk.Entry(window)
     delay = tk.Entry(window)
     ignoreColor = tk.Entry(window)
+
 
     s = open("./server/gui.json", "r")
     data = json.load(s)
@@ -126,6 +102,7 @@ def windowopener():
         0, data['image'])
     #e2.insert(0, data['platform'])
     dropdown.set(data['platform'])
+    ditherAlg.set(data['ditherAlgorithm'])
     e3.insert(0, data['speed'])
     e4.insert(0, data['oneLineIs'])
     e5.insert(0, data['accuracy'])
@@ -134,14 +111,14 @@ def windowopener():
     delay.insert(0, data['delayBetweenColors'])
     ignoreColor.insert(0, data['ignoreColor'])
 
-    e1.grid(row=10, column=1)
+    e1.grid(row=11, column=1)
     e3.grid(row=1, column=1)
     e4.grid(row=2, column=1)
     e5.grid(row=3, column=1)
     e6.grid(row=4, column=1)
-    num.grid(row=8, column=1)
-    delay.grid(row=9, column=1)
-    ignoreColor.grid(row=7, column=1)
+    num.grid(row=9, column=1)
+    delay.grid(row=10, column=1)
+    ignoreColor.grid(row=8, column=1)
 
     dithering = tk.IntVar()
     tk.Checkbutton(window, text="Dither",
