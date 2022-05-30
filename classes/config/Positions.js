@@ -49,7 +49,6 @@ module.exports = class Positions extends BaseConfig {
      * @returns {{topleft: {x: number, y: number}, bottomright: {x: number, y: number}, colors: {hex: {x: number, y: number}}}}
      */
     getPlatform(platform) {
-
         return this.data[platform]
 
     }

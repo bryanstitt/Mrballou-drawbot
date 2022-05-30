@@ -10,19 +10,16 @@ projectData = {}
 positionData = {}
 settingsData = {}
 
-
 def getData(file):
     print('reading data from ' + file)
     with open(file, "r") as f:
         return json.load(f)
-
 
 def getPlatforms(data):
     res = []
     for platform in data:
         res.append(platform)
     return res
-
 
 def main(port):
     def saveConfig():
@@ -142,10 +139,10 @@ def main(port):
 def onPress(key):
     if key == keyboard.Key.esc or key == config['abortKey']:
         print("Aborting")
+        print(path)
         # create a new json file
         with open(path, 'w') as f:
             json.dump({"abort": True}, f)
-
 
 config = {}
 
@@ -157,9 +154,7 @@ path = config["temp"]+config["abortingFile"]
 
 def keyboardListener():
     with keyboard.Listener(on_press=onPress) as l:
-
         l.join()
-
 
 if __name__ == "__main__":
 

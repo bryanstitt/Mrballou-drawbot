@@ -54,12 +54,12 @@ module.exports = class InstructionWriter {
         }
 
         recolored.write(this.config.temp + 'recolored.png')
+        colors = Object.fromEntries(
+            Object.entries(colors).sort(([,a],[,b]) => b-a)
+        );
         console.log(colors)
 
-        // todo: sort colors
-
-
-        // make first dot at topleft to make shure we are focused in the right window
+        // make first dot at topleft to make sure we are focused in the right window
 
         instructions.push(new DrawInstruction('DOT', {
             x1: position.topleft.x,
@@ -74,6 +74,8 @@ module.exports = class InstructionWriter {
 
 
             for (let y = 0; y < recolored.bitmap.height; y++) {
+                let solidLine = true
+                let breakX = false
                 for (let x = 0; x < recolored.bitmap.width; x++) {
                     let numb = recolored.getPixelColor(x, y)
                     let rgba = Jimp.intToRGBA(numb)
@@ -83,8 +85,7 @@ module.exports = class InstructionWriter {
                     if (!lastColor || hex !== lastColor) {
                         lastColor = hex
                         let pos = position.colors[hex]
-                        // console.log(pos)
-                        // console.log(hex)
+
                         let instruction = new DrawInstruction('DOT', {
                             x1: pos.x,
                             y1: pos.y,
@@ -97,35 +98,47 @@ module.exports = class InstructionWriter {
                     if (this.settings.fast) {
                         let pixels = 0
                         let looping = true
-                        for (let fx = x; fx < recolored.bitmap.width && looping; fx++) {
-                            let fy = y
 
+                        for (let fx = x; fx < recolored.bitmap.width && looping; fx++) { //852
+                            let fy = y
                             let fnumb = recolored.getPixelColor(fx, fy)
                             let frgba = Jimp.intToRGBA(fnumb)
                             let fhex = rgbToHex(frgba)
+
                             if (fhex == hex) {
                                 pixels++
+                                if(fx == recolored.bitmap.width - 1) {
+                                    let instruction = new DrawInstruction('DRAG', {
+                                        x1: x + position.topleft.x,
+                                        y1: y + position.topleft.y,
+                                        x2: x + position.topleft.x + (pixels - 1),
+                                        y2: y + position.topleft.y,
+    
+                                        delay: this.settings.delay,
+                                    }, "DRAW_LINE")
+                                    instructions.push(instruction)
+                                    looping = false
+                                    breakX = true
+                                }
                             }
                             else {
                                 let instruction = new DrawInstruction('DRAG', {
-                                    x1: (x * this.settings.distancing) + position.topleft.x,
-                                    y1: (y * this.settings.distancing) + position.topleft.y,
-
-                                    x2: (x * this.settings.distancing) + position.topleft.x + ((pixels - 1) * this.settings.distancing),
-                                    y2: (y * this.settings.distancing) + position.topleft.y,
+                                    x1: x + position.topleft.x,
+                                    y1: y + position.topleft.y,
+                                    x2: x + position.topleft.x + (pixels - 1),
+                                    y2: y + position.topleft.y,
 
                                     delay: this.settings.delay,
                                 }, "DRAW_LINE")
                                 instructions.push(instruction)
-
                                 x = fx - 1
                                 looping = false
                             }
-
-
+                            
                         }
-
-
+                       
+                        if(breakX) break;
+                        
                     }
                     else {
                         let instruction = new DrawInstruction('DOT', {
@@ -142,46 +155,40 @@ module.exports = class InstructionWriter {
 
         // make shure EVERY draw instruction is in bounds
 
-        for (let instruction of instructions) {
-            if (instruction.comment.toLowerCase().includes('draw')) {
-                if (instruction.cords.x1 < position.topleft.x || instruction.cords.x1 > position.bottomright.x ||
-                    instruction.cords.y1 < position.topleft.y || instruction.cords.y1 > position.bottomright.y ||
+        // for (let instruction of instructions) {
+        //     if (instruction.comment.toLowerCase().includes('draw')) {
+        //         if (instruction.cords.x1 < position.topleft.x || instruction.cords.x1 > position.bottomright.x ||
+        //             instruction.cords.y1 < position.topleft.y || instruction.cords.y1 > position.bottomright.y ||
 
-                    instruction.cords.x2 < position.topleft.x || instruction.cords.x2 > position.bottomright.x ||
-                    instruction.cords.y2 < position.topleft.y || instruction.cords.y2 > position.bottomright.y
-                ) {
+        //             instruction.cords.x2 < position.topleft.x || instruction.cords.x2 > position.bottomright.x ||
+        //             instruction.cords.y2 < position.topleft.y || instruction.cords.y2 > position.bottomright.y
+        //         ) {
 
-                    if (instruction.type == 'DRAG') {
-                        instruction.cords.x2 = instruction.cords.x2 > position.bottomright.x ? position.bottomright.x : instruction.cords.x2
-                        instruction.cords.x2 = instruction.cords.x2 < position.topleft.x ? position.topleft.x : instruction.cords.x2
+        //             if (instruction.type == 'DRAG') {
+        //                 instruction.cords.x2 = instruction.cords.x2 > position.bottomright.x ? position.bottomright.x : instruction.cords.x2
+        //                 instruction.cords.x2 = instruction.cords.x2 < position.topleft.x ? position.topleft.x : instruction.cords.x2
 
-                        instruction.cords.y2 = instruction.cords.y2 > position.bottomright.y ? position.bottomright.y : instruction.cords.y2
-                        instruction.cords.y2 = instruction.cords.y2 < position.topleft.y ? position.topleft.y : instruction.cords.y2
+        //                 instruction.cords.y2 = instruction.cords.y2 > position.bottomright.y ? position.bottomright.y : instruction.cords.y2
+        //                 instruction.cords.y2 = instruction.cords.y2 < position.topleft.y ? position.topleft.y : instruction.cords.y2
 
-                        instruction.cords.x1 = instruction.cords.x1 > position.bottomright.x ? position.bottomright.x : instruction.cords.x1
-                        instruction.cords.x1 = instruction.cords.x1 < position.topleft.x ? position.topleft.x : instruction.cords.x1
+        //                 instruction.cords.x1 = instruction.cords.x1 > position.bottomright.x ? position.bottomright.x : instruction.cords.x1
+        //                 instruction.cords.x1 = instruction.cords.x1 < position.topleft.x ? position.topleft.x : instruction.cords.x1
 
-                        instruction.cords.y1 = instruction.cords.y1 > position.bottomright.y ? position.bottomright.y : instruction.cords.y1
-                        instruction.cords.y1 = instruction.cords.y1 < position.topleft.y ? position.topleft.y : instruction.cords.y1
-                    }
-                    else {
-                        instruction.comment = 'OUT_OF_BOUNDS'
-                    }
-                }
-            }
+        //                 instruction.cords.y1 = instruction.cords.y1 > position.bottomright.y ? position.bottomright.y : instruction.cords.y1
+        //                 instruction.cords.y1 = instruction.cords.y1 < position.topleft.y ? position.topleft.y : instruction.cords.y1
+        //             }
+        //             else {
+        //                 instruction.comment = 'OUT_OF_BOUNDS'
+        //             }
+        //         }
+        //     }
 
-        }
+        // }
 
-        // remove every out of bounds
-        instructions = instructions.filter(i => i.comment !== 'OUT_OF_BOUNDS')
+        // // remove every out of bounds
+        // instructions = instructions.filter(i => i.comment !== 'OUT_OF_BOUNDS')
 
         //remove any directly repeating set color instructions
-
-
-
-
-
-
 
         return instructions
     }

@@ -54,11 +54,9 @@ module.exports = class DrawManager {
         }
 
         console.log(`resizing to ${size.w}x${size.h}`)
-        let resized = await this.resizer.resize(img, size)
+        img = await this.resizer.resize(img, size) // changed this from resized to img
 
-        await resized.writeAsync(this.config.temp + 'resized.png')
-
-        // let resized = img // to test stuff
+        await img.writeAsync(this.config.temp + 'resized.png')
 
         // resized = await resized.rotate(42)
 
@@ -71,7 +69,6 @@ module.exports = class DrawManager {
 
         let instructions = this.instructionWriter.write(img, positions, settings)
 
-        // console.log(instructions)
         let pos = 0
         for (let instruction of instructions) {
             // console.log(instruction)
@@ -86,7 +83,5 @@ module.exports = class DrawManager {
         }
 
         console.log('done')
-
-
     }
 }

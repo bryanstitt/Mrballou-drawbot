@@ -7,7 +7,7 @@ module.exports = class Config extends BaseConfig {
         this.data = {
             temp: './temp/',
             abortingFile: "aborting.json",
-            port: 25600,
+            port: 8000,
             prettifyData: false,
             abortKey: 'q'
         }

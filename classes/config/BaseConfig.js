@@ -1,3 +1,4 @@
+const { json } = require('express/lib/response')
 const fs = require('fs')
 
 module.exports = class Config {
@@ -12,6 +13,8 @@ module.exports = class Config {
      * @returns {boolean} true if all keys and values are of the correct type
      */
     validateTypes(config) {
+        // console.log('Config:' + JSON.stringify(config))
+        // console.log('Data:' + JSON.stringify(this.data))
         return this.validateObjectTypes(config, this.data)
     }
     /**

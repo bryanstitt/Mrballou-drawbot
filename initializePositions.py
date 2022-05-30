@@ -57,7 +57,7 @@ def onClick(x, y, button, pressed):
             positions[name]["topleft"]["x"] = x
             positions[name]["topleft"]["y"] = y
             status = "bottomright"
-            print('now at the bottom left')
+            print('now at the bottom right')
             return
 
         if status == "bottomright":
